@@ -1,7 +1,7 @@
 #include <iostream>
 #include <string>
 #include <fstream>
-#include "json.hpp"
+#include "lib/json.hpp"
 #include "structs.h"
 #include "generators.h"
 #include "crawl.h"
@@ -20,7 +20,7 @@ void process_for_pipe(Config::Website &w, vector<Config::Pipe> &v)
             Pipe p;
             p.url = urls[i];
             p.name = w.url;
-            move(w.data.begin(), w.data.end(), back_inserter(p.data));
+            copy(w.data.begin(), w.data.end(), back_inserter(p.data));
             v.push_back(p);
         }
     }
@@ -29,7 +29,7 @@ void process_for_pipe(Config::Website &w, vector<Config::Pipe> &v)
         Pipe p;
         p.url = w.url;
         p.name = w.url;
-        move(w.data.begin(), w.data.end(), back_inserter(p.data));
+        copy(w.data.begin(), w.data.end(), back_inserter(p.data));
         v.push_back(p);
     }
 }

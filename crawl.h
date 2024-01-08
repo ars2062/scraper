@@ -5,18 +5,55 @@
 #include <map>
 #include <regex>
 
-#include "pool.h"
-#include "json.hpp"
-// #include "libxml2/libxml/parser.h"
-#include <curl/curl.h>
+#include "lib/json.hpp"
+#include "lib/pool.h"
+#include <indicators/progress_bar.hpp>
+#include <indicators/cursor_control.hpp>
 
-#include <libxml/xpath.h>
-#include <libxml/HTMLparser.h>
+#include "libxml/HTMLparser.h"
+#include "libxml/xpath.h"
+#include "cpr/cpr.h"
+
+#define LOG(x) cout << '"' << x << '"' << endl
+
+template <typename T, typename F>
+void logVector(
+    const vector<T> &vector, F T::*field)
+{
+    // Printing all the elements
+    // using <<
+    for (auto element : vector)
+    {
+        LOG(element.*field);
+    }
+}
 
 namespace Crawler
 {
     using namespace nlohmann;
     using namespace Config;
+    using namespace indicators;
+    static inline void ltrim(std::string &s)
+    {
+        s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](unsigned char ch)
+                                        { return !std::isspace(ch); }));
+    }
+
+    // trim from end (in place)
+    static inline void rtrim(std::string &s)
+    {
+        s.erase(std::find_if(s.rbegin(), s.rend(), [](unsigned char ch)
+                             { return !std::isspace(ch); })
+                    .base(),
+                s.end());
+    }
+
+    // trim from both ends (in place)
+    static inline void trim(std::string &s)
+    {
+        rtrim(s);
+        ltrim(s);
+    }
 
     set<string> processed;
     static size_t WriteCallback(void *contents, size_t size, size_t nmemb, void *userp)
@@ -27,98 +64,59 @@ namespace Crawler
 
     std::string get_request(std::string word)
     {
-        CURLcode res_code = CURLE_FAILED_INIT;
-        CURL *curl = curl_easy_init();
-        std::string result;
-        std::string url = "https://www.merriam-webster.com/dictionary/" + word;
-
-        curl_global_init(CURL_GLOBAL_ALL);
-
-        if (curl)
-        {
-            curl_easy_setopt(curl,
-                             CURLOPT_WRITEFUNCTION,
-                             static_cast<curl_write>([](char *contents, size_t size,
-                                                        size_t nmemb, std::string *data) -> size_t
-                                                     {
-        size_t new_size = size * nmemb;
-        if (data == NULL) {
-          return 0;
-        }
-        data -> append(contents, new_size);
-        return new_size; }));
-            curl_easy_setopt(curl, CURLOPT_WRITEDATA, &result);
-            curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-            curl_easy_setopt(curl, CURLOPT_USERAGENT, "simple scraper");
-
-            res_code = curl_easy_perform(curl);
-
-            if (res_code != CURLE_OK)
-            {
-                return curl_easy_strerror(res_code);
-            }
-
-            curl_easy_cleanup(curl);
-        }
-
-        curl_global_cleanup();
-
-        return result;
+        cpr::Response response = cpr::Get(cpr::Url{word});
+        return response.text;
     }
-    vector<xmlNodePtr> select_xpath(xmlDocPtr html,
-                                    xmlNodePtr node,
+    vector<xmlNodePtr> select_xpath(xmlXPathContextPtr ctxPtr,
                                     string selector)
     {
+
         vector<xmlNodePtr> res;
-        xmlXPathContextPtr context = xmlXPathNewContext(html);
-
-        if (node != NULL)
-            context->node = node;
-        xmlXPathObjectPtr xpathObj = xmlXPathEvalExpression(reinterpret_cast<const xmlChar *>(selector.c_str()), context);
-
-        if (xpathObj)
+        xmlXPathObjectPtr xpathObj = xmlXPathEvalExpression(BAD_CAST selector.c_str(), ctxPtr);
+        if (xpathObj == NULL)
+            return res;
+        if (xmlXPathNodeSetIsEmpty(xpathObj->nodesetval))
         {
-            for (int i = 0; i < xpathObj->nodesetval->nodeNr; ++i)
-            {
-                xmlNodePtr node = xpathObj->nodesetval->nodeTab[i];
-                res.push_back(node);
-            }
-
-            // Free the XPath object
             xmlXPathFreeObject(xpathObj);
+            return res;
         }
-        xmlXPathFreeContext(context);
+        for (int i = 0; i < xpathObj->nodesetval->nodeNr; ++i)
+        {
+            xmlNodePtr node = xpathObj->nodesetval->nodeTab[i];
+            res.push_back(node);
+        }
+        xmlXPathFreeObject(xpathObj);
         return res;
     }
 
-    string getDataValue(xmlDocPtr html,
-                        xmlNodePtr node,
+    string getDataValue(xmlXPathContextPtr ctxPtr,
                         Data data)
     {
-        string res;
+        string res = "";
 
         auto &[selector,
                multiple,
                name,
                children,
                subUrl] = data;
-        for (auto &node : select_xpath(html, node, selector))
+        auto nodes = select_xpath(ctxPtr, selector);
+        for (auto &node : nodes)
         {
-            res += string(reinterpret_cast<char *>(node->content));
+            res += string((char *)xmlNodeGetContent(node));
         }
+        trim(res);
         return res;
     }
 
-    void serverside(const Pipe &pipe, json &parent, bool noParentProperty);
+    void serverside(const Pipe &pipe, json *parent, bool noParentProperty);
 
-    void handleSubURL(xmlDocPtr html,
-                      xmlNodePtr node,
+    void handleSubURL(xmlXPathContextPtr ctxPtr,
                       Data data,
                       string url,
-                      json parent)
+                      json *parent)
     {
         auto selector = data.subUrl.urlSelector;
-        auto anchor = selector == "self" ? node : select_xpath(html, node, selector)[0];
+        auto anchor = select_xpath(ctxPtr, selector)[0];
 
         string href = string(reinterpret_cast<char *>(xmlGetProp(anchor, (const xmlChar *)"href")));
         if (href.size() == 0)
@@ -139,29 +137,30 @@ namespace Crawler
             }
         }
 
-        if (parent[data.name].is_null())
+        auto prop = &parent->operator[](data.name);
+
+        if (prop->is_null())
         {
-            parent[data.name] = json::value_t::object;
+            *prop = json::value_t::object;
         }
-        else if (parent[data.name].is_string())
+        else if (prop->is_string())
         {
-            auto value = parent[data.name];
-            parent[data.name] = json::value_t::object;
-            parent[data.name]["value"] = value;
+            auto value = *prop;
+            *prop = json::value_t::object;
+            prop->operator[]("value") = value;
         }
         Pipe p;
         p.url = href;
         p.name = url;
         p.clientside = data.subUrl.clientside;
         move(data.subUrl.data.begin(), data.subUrl.data.end(), back_inserter(p.data));
-        serverside(p, parent[data.name], true);
+        serverside(p, prop, true);
     }
 
-    void resolveData(xmlDocPtr html,
-                     xmlNodePtr node,
+    void resolveData(xmlXPathContextPtr ctxPtr,
                      vector<Data> data,
                      string url,
-                     json parent)
+                     json *parent)
     {
         for (auto &d : data)
         {
@@ -170,29 +169,44 @@ namespace Crawler
                   name,
                   children,
                   subUrl] = d;
+            auto prop = &parent->operator[](name);
+
             if (children.size() > 0)
             {
                 if (multiple)
                 {
-                    for (auto &node : select_xpath(html, node, selector))
+                    for (auto &node : select_xpath(ctxPtr, selector))
                     {
                         json o = json::value_t::object;
-                        parent[name].push_back(o);
-                        resolveData(html, node, children, url, o);
+                        if (prop->is_null())
+                            *prop = json::value_t::array;
+                        auto newCtxPtr = xmlXPathNewContext(node->doc);
+                        xmlNodePtr myParent = node->parent;
+                        xmlNodePtr originalRootElement = xmlDocGetRootElement(node->doc);
+                        xmlDocSetRootElement(node->doc, node);
+                        resolveData(newCtxPtr, children, url, (&o));
+                        if (subUrl.data.size() > 0)
+                        {
+                            handleSubURL(newCtxPtr, d, url, (&o));
+                        }
+                        prop->push_back(o);
+                        xmlDocSetRootElement(originalRootElement->doc, originalRootElement);
+                        xmlAddChild(myParent, node);
+                        xmlXPathFreeContext(newCtxPtr);
                     }
                 }
                 else
                 {
-                    if (parent[name].is_null())
-                        parent[name] = json::value_t::object;
-                    resolveData(html, node, children, url, parent);
+                    if (prop->is_null())
+                        *prop = json::value_t::object;
+                    resolveData(ctxPtr, children, url, parent);
                     if (subUrl.data.size() > 0)
-                        handleSubURL(html, node, d, url, parent);
+                        handleSubURL(ctxPtr, d, url, parent);
                 }
             }
             else
             {
-                parent[name] = getDataValue(html, node, d);
+                *prop = getDataValue(ctxPtr, d);
             }
         }
     }
@@ -202,35 +216,50 @@ namespace Crawler
         throw "client side not integrated";
     }
 
-    void serverside(const Pipe &pipe, json &parent, bool noParentProperty = false)
+    void serverside(const Pipe &pipe, json *parent, bool noParentProperty = false)
     {
         auto [name,
               url,
               data,
               clientside] = pipe;
 
-        string html_document = get_request(string(url));
+        string response = get_request(string(url));
 
-        htmlDocPtr html = htmlReadMemory(html_document.c_str(), html_document.length(), nullptr, nullptr, HTML_PARSE_NOERROR);
+        htmlDocPtr doc = htmlReadMemory(response.c_str(), response.length(), "", nullptr, HTML_PARSE_NOWARNING | HTML_PARSE_NOERROR | HTML_PARSE_RECOVER);
+        xmlXPathContextPtr context = xmlXPathNewContext(doc);
 
-        if (!noParentProperty && parent[name].is_null())
-            parent[name] = json::value_t::object;
-        resolveData(html, NULL, data, url, noParentProperty ? parent : parent[name]);
+        auto o = &parent->operator[](name);
+
+        if (!noParentProperty && o->is_null())
+            *o = json::value_t::object;
+        resolveData(context, data, url, noParentProperty ? parent : o);
+        xmlXPathFreeContext(context);
+        xmlFreeDoc(doc);
         processed.insert(url);
     }
 
     json crawl(vector<Pipe> &pipes)
     {
-        // ThreadPool pool(thread::hardware_concurrency());
-        ThreadPool pool(1);
+        show_console_cursor(false);
+        ThreadPool pool(thread::hardware_concurrency());
         json result = json::value_t::object;
+        indicators::ProgressBar p{
+            option::BarWidth{50},
+            option::Start{"["},
+            option::Fill{"■"},
+            option::Lead{"■"},
+            option::Remainder{" "},
+            option::End{"]"},
+            option::ForegroundColor{indicators::Color::green},
+            option::FontStyles{std::vector<indicators::FontStyle>{indicators::FontStyle::bold}}};
 
         auto *resultPtr = &result;
         int counter = 0;
+        int max = pipes.size();
+        mutex m;
         for (const auto &pipe : pipes)
         {
-
-            pool.enqueue([pipe, resultPtr, &counter]
+            pool.enqueue([pipe, max, resultPtr, &counter, &p, &m]
                          {
             if (pipe.clientside)
             {
@@ -238,18 +267,31 @@ namespace Crawler
             }
             else
             {
-                try
-                {
-                    serverside(pipe, *resultPtr);
-                }
-                catch(const std::exception& e)
-                {
-                    std::cerr << e.what() << '\n';
-                    throw e;
-                }
+                // try
+                // {
+                serverside(pipe, resultPtr);
+                // }
+                // catch (const std::exception &e)
+                // {
+                //     std::cerr << e.what() << '\n';
+                //     throw e;
+                // }
             }
-            cout << ++counter << endl; });
+            
+            m.lock();
+            counter++;
+            auto progress = counter / (float)max * 100;
+            stringstream s;
+            s.precision(3);
+            s<<progress;
+            auto text = to_string(counter) + "/" + to_string(max) + " " + s.str() + "%";
+            p.set_option(option::PostfixText{text});
+            p.set_progress(progress);
+            m.unlock(); });
         }
+        pool.~ThreadPool();
+        p.mark_as_completed();
+        show_console_cursor(true);
         return result;
     }
 } // namespace Crawler

@@ -4,10 +4,10 @@
     {
       "type": "shell",
       "label": "build g++",
-      "command": "/usr/bin/make",
-      "args": ["build"],
+      "command": "/usr/bin/make && cp scraper ../",
+      "args": [],
       "options": {
-        "cwd": "${workspaceFolder}"
+        "cwd": "${workspaceFolder}/build"
       },
       "group": "build"
     }

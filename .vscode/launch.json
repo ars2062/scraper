@@ -9,7 +9,7 @@
             "name": "(gdb) Launch",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/main",
+            "program": "${workspaceFolder}/scraper",
             "args": ["./config.json"],
             "stopAtEntry": false,
             "cwd": "${fileDirname}",

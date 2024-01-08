@@ -4,16 +4,18 @@
 #include <vector>
 #include <thread>
 #include <set>
-#include "pool.h"
+#include <indicators/progress_bar.hpp>
+#include <indicators/cursor_control.hpp>
 
 namespace Combination
 {
     using namespace std;
+    using namespace indicators;
     typedef map<string, vector<string>> CombinationMap;
     typedef vector<vector<string>> CombinationArray;
     typedef vector<int> Odometer;
 
-    auto form_combination(Odometer odometer, CombinationArray combinations, vector<vector<string>> &output, mutex &m)
+    auto form_combination(Odometer odometer, CombinationArray combinations, vector<vector<string>> &output)
     {
         vector<string> c;
         for (int i = 0; i < odometer.size(); i++)
@@ -23,9 +25,7 @@ namespace Combination
             c.push_back(combinations.at(i).at(odometer[i]));
         }
 
-        m.lock();
         output.push_back(c);
-        m.unlock();
     }
     bool odometer_increment(Odometer &odometer, CombinationArray combinations)
     {
@@ -52,7 +52,7 @@ namespace Combination
         }
     }
 
-    Combination::CombinationArray combine_vectors(string url, CombinationMap combinations, ThreadPool &pool)
+    Combination::CombinationArray combine_vectors(string url, CombinationMap combinations)
     {
         vector<vector<string>> result;
         Odometer odometer;
@@ -67,24 +67,41 @@ namespace Combination
             arr.push_back(val);
             total *= val.size();
         }
+        reverse(arr.begin(), arr.end());
 
-        mutex m;
-        form_combination(odometer, arr, result, m);
+        form_combination(odometer, arr, result);
 
         int counter = 1;
-
+        show_console_cursor(false);
+        indicators::ProgressBar p{
+            option::BarWidth{50},
+            option::Start{"["},
+            option::Fill{"■"},
+            option::Lead{"■"},
+            option::Remainder{" "},
+            option::End{"]"},
+            option::ForegroundColor{indicators::Color::green},
+            option::PrefixText{"generating all possible urls"},
+            option::FontStyles{std::vector<indicators::FontStyle>{indicators::FontStyle::bold}}};
         while (odometer_increment(odometer, arr))
         {
             auto o = odometer;
-            pool.enqueue([&counter, o, arr, &result, url, total, &m]
-                         {
+            // pool.enqueue([&counter, o, arr, &result, url, total, &m]
+            //              {
             counter++;
             // cout << '\r' << "generating possible urls for \"" << url << "\": " << counter << " / " << total;
-            cout << '\r' << counter << "/" << total;
-            form_combination(o, arr, result, m); });
+            // cout << '\r' << counter << "/" << total;
+            auto progress = counter / (float)total * 100;
+            stringstream s;
+            s.precision(3);
+            s<<progress;
+            p.set_option(option::PostfixText{to_string(counter) + "/" + to_string(total) + " " + s.str()+"%"});
+            p.set_progress(progress);
+            form_combination(o, arr, result); 
+            // });
         }
-
-        cout << endl;
+        p.mark_as_completed();
+        show_console_cursor(true);
 
         return result;
     }

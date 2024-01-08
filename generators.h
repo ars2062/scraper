@@ -1,7 +1,6 @@
 #include "structs.h"
 #include "combination.h"
 #include <map>
-#include <chrono>
 
 #if !defined(MY_GENERATORS_HEADER)
 #define MY_GENERATORS_HEADER
@@ -31,8 +30,7 @@ namespace Generators
             }
         }
 
-        ThreadPool pool = ThreadPool(thread::hardware_concurrency());
-        Combination::CombinationArray posibilities = Combination::combine_vectors(url, values, pool);
+        Combination::CombinationArray posibilities = Combination::combine_vectors(url, values);
 
         vector<string> result;
         for (int i = 0; i < posibilities.size(); i++)

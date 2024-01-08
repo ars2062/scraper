@@ -1,6 +1,6 @@
 #include <string>
 #include <iostream>
-#include "json.hpp"
+#include "lib/json.hpp"
 
 using namespace std;
 using json = nlohmann::json;
@@ -59,7 +59,7 @@ namespace Config
         for (auto i = 0; i < size; i++)
         {
             const auto *pagination = &j.at(i);
-            Pagination p;
+            Pagination p = {};
 
             p.key = pagination->at("key");
             if (pagination->contains("min"))
