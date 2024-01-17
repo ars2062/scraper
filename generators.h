@@ -7,13 +7,13 @@
 namespace Generators
 {
 
-    vector<string> urls_from_paginations(string url, const vector<Config::Pagination> &v)
+    vector<string> urls_from_pagination(const string& url, const vector<Config::Pagination> &v)
     {
         std::map<string, vector<string>> values;
 
-        for (int i = 0; i < v.size(); i++)
+        for (const auto & i : v)
         {
-            const auto *p = &v[i];
+            const auto *p = &i;
             if (p->values.size() > 0)
             {
                 for (const auto &it : p->values)
@@ -30,17 +30,17 @@ namespace Generators
             }
         }
 
-        Combination::CombinationArray posibilities = Combination::combine_vectors(url, values);
+        Combination::CombinationArray possibilities = Combination::combine_vectors(values);
 
         vector<string> result;
-        for (int i = 0; i < posibilities.size(); i++)
+        for (auto & p : possibilities)
         {
-            auto *posibility = &posibilities[i];
+            auto *possibility = &p;
             string newUrl = url;
-            for (int j = 0; j < posibility->size(); j++)
+            for (int j = 0; j < possibility->size(); j++)
             {
                 auto key = "{" + v.at(j).key + "}";
-                auto value = posibility->at(j);
+                auto value = possibility->at(j);
                 size_t start_pos = newUrl.find(key);
                 newUrl.replace(start_pos, key.length(), value);
             }

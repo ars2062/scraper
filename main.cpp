@@ -12,13 +12,13 @@ using namespace Config;
 
 void process_for_pipe(Config::Website &w, vector<Config::Pipe> &v)
 {
-    if (w.paginations.size() > 0)
+    if (!w.paginations.empty())
     {
-        const auto urls = Generators::urls_from_paginations(w.url, w.paginations);
-        for (int i = 0; i < urls.size(); i++)
+        const auto urls = Generators::urls_from_pagination(w.url, w.paginations);
+        for (const auto & url : urls)
         {
             Pipe p;
-            p.url = urls[i];
+            p.url = url;
             p.name = w.url;
             copy(w.data.begin(), w.data.end(), back_inserter(p.data));
             v.push_back(p);
@@ -34,13 +34,13 @@ void process_for_pipe(Config::Website &w, vector<Config::Pipe> &v)
     }
 }
 
-int main(int argc, char const *argv[])
+int main([[maybe_unused]] int argc, char const *argv[])
 {
     ifstream f;
     f.open((string)argv[1]);
     if (!f.is_open())
     {
-        return 1;
+        return 404;
     }
     json config;
     f >> config;
@@ -49,9 +49,9 @@ int main(int argc, char const *argv[])
     json_to_websites(config, websites);
     vector<Config::Pipe> pipes;
 
-    for (int i = 0; i < websites.size(); i++)
+    for (auto & website : websites)
     {
-        process_for_pipe(websites[i], pipes);
+        process_for_pipe(website, pipes);
     }
 
     auto result = Crawler::crawl(pipes);

@@ -4,105 +4,74 @@
 #include <vector>
 #include <thread>
 #include <set>
+#include <future>
 #include <indicators/progress_bar.hpp>
 #include <indicators/cursor_control.hpp>
 
-namespace Combination
-{
+namespace Combination {
     using namespace std;
     using namespace indicators;
     typedef map<string, vector<string>> CombinationMap;
     typedef vector<vector<string>> CombinationArray;
     typedef vector<int> Odometer;
 
-    auto form_combination(Odometer odometer, CombinationArray combinations, vector<vector<string>> &output)
-    {
+    void form_combination(Odometer odometer, CombinationArray combinations, vector<vector<string>> &output) {
         vector<string> c;
-        for (int i = 0; i < odometer.size(); i++)
-        {
-            auto it = combinations.begin();
-            std::advance(it, i);
-            c.push_back(combinations.at(i).at(odometer[i]));
+        c.reserve(odometer.size());
+        for (int i = 0; i < odometer.size(); i++) {
+//            auto it = combinations.begin();
+//            std::advance(it, i);
+//            c.push_back(combinations.at(i).at(odometer[i]));
+            c.push_back(combinations[i][odometer[i]]);
         }
 
         output.push_back(c);
     }
-    bool odometer_increment(Odometer &odometer, CombinationArray combinations)
-    {
-        for (int i = odometer.size() - 1; i >= 0; i--)
-        {
-            auto maxee = combinations[i].size() - 1;
-            if (odometer[i] + 1 <= maxee)
-            {
+
+    bool odometer_increment(Odometer &odometer, const CombinationArray &combinations) {
+        for (int i = odometer.size() - 1; i >= 0; i--) {
+            auto max = combinations[i].size() - 1;
+            if (odometer[i] + 1 <= max) {
                 odometer[i]++;
                 return true;
-            }
-            else
-            {
-                if (i - 1 < 0)
-                {
+            } else {
+                if (i - 1 < 0) {
                     return false;
-                }
-                else
-                {
+                } else {
                     odometer[i] = 0;
                     continue;
                 }
             }
         }
+        return false;
     }
 
-    Combination::CombinationArray combine_vectors(string url, CombinationMap combinations)
-    {
+    CombinationArray combine_vectors(const CombinationMap &combinations) {
         vector<vector<string>> result;
         Odometer odometer;
         int total = 1;
-        for (int i = 0; i < combinations.size(); i++)
-        {
-            odometer.push_back(0);
-        }
         CombinationArray arr;
-        for (auto const &[key, val] : combinations)
-        {
-            arr.push_back(val);
+        for (const auto& [key, val] : combinations) {
+            odometer.push_back(0);
             total *= val.size();
+            arr.push_back(val);
         }
+
         reverse(arr.begin(), arr.end());
 
         form_combination(odometer, arr, result);
 
         int counter = 1;
-        show_console_cursor(false);
-        indicators::ProgressBar p{
-            option::BarWidth{50},
-            option::Start{"["},
-            option::Fill{"■"},
-            option::Lead{"■"},
-            option::Remainder{" "},
-            option::End{"]"},
-            option::ForegroundColor{indicators::Color::green},
-            option::PrefixText{"generating all possible urls"},
-            option::FontStyles{std::vector<indicators::FontStyle>{indicators::FontStyle::bold}}};
-        while (odometer_increment(odometer, arr))
-        {
-            auto o = odometer;
-            // pool.enqueue([&counter, o, arr, &result, url, total, &m]
-            //              {
+
+        cout << "generating all possible URLs" << endl;
+
+        while (odometer_increment(odometer, arr)) {
             counter++;
-            // cout << '\r' << "generating possible urls for \"" << url << "\": " << counter << " / " << total;
-            // cout << '\r' << counter << "/" << total;
-            auto progress = counter / (float)total * 100;
-            stringstream s;
-            s.precision(3);
-            s<<progress;
-            p.set_option(option::PostfixText{to_string(counter) + "/" + to_string(total) + " " + s.str()+"%"});
-            p.set_progress(progress);
-            form_combination(o, arr, result); 
-            // });
+            form_combination(odometer, arr, result);
         }
-        p.mark_as_completed();
-        show_console_cursor(true);
+
+        cout << "generated " << result.size() << " possibilities" << endl;
 
         return result;
     }
-} // namespace Counter
+} // namespace Combination
